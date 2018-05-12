@@ -19,8 +19,11 @@ import java.io.IOException;
 @Slf4j
 public class HttpConnectionUtil {
 
-    @Autowired
     private HttpClientPool httpClientPool;
+
+    public HttpConnectionUtil(HttpClientPool httpClientPool) {
+        this.httpClientPool = httpClientPool;
+    }
 
     public String postWithJson(String url, String json) {
         String result = StringUtils.EMPTY;
