@@ -12,10 +12,10 @@ spring:
     url: jdbc:mysql://localhost:3306/his
     driver-class-name: com.mysql.jdbc.Driver
     username: root
-    password: dg34672
+    password: aizai051023
 social:
   insurance:
-    url: http://192.168.1.228:17001/szywsl/
+    url: http://192.168.1.228:17001/szywsl/
     hospital:
       code: HHK00
     area: 440300

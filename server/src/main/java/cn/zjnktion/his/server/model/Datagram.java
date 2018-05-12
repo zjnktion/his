@@ -28,7 +28,7 @@ public class Datagram {
     private String operatorName = StringUtils.EMPTY;
     private String operatorPass = StringUtils.EMPTY;
     private Map<String, Object> transBody = new HashMap<>();
-    private String transChannel = StringUtils.EMPTY;
+    private String transChannel = "10";
     private String verifyCode = StringUtils.EMPTY;
     private String extendDeviceId = StringUtils.EMPTY;
     private String extendUserId = StringUtils.EMPTY;

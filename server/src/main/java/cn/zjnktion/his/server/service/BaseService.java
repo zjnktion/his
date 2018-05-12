@@ -8,11 +8,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
-import javax.validation.constraints.NotNull;
-import java.util.Date;
 import java.util.Map;
 
 /**
@@ -28,20 +29,8 @@ public class BaseService {
     @Autowired
     private HttpConnectionUtil httpConnectionUtil;
 
-    @Autowired
-    private HttpServletRequest request;
-
     @Value("${social.insurance.url}")
     private String socialInsuranceUrl;
-
-    @Value("${social.insurance.hospital.code}")
-    private String socialInsuranceHospitalCode;
-
-    @Value(("${social.insurance.area}"))
-    private String socialInsuranceArea;
-
-    @Value("${social.insurance.channel}")
-    private String socialInsuranceChannel;
 
     @RequestMapping(value = "/forward", method = RequestMethod.POST)
     public Datagram forward(@RequestBody Datagram req) {
@@ -49,24 +38,15 @@ public class BaseService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/info/{socialInsuranceCode}", method = RequestMethod.POST)
-    public ResponseBean<?> info(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode) {
-        String currentDate = DateFormatUtil.format(new Date());
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("XX001");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+    @RequestMapping(value = "/info", method = RequestMethod.POST)
+    public ResponseBean<?> baseInfo(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
-        req.getTransBody().put("aaz500", socialInsuranceCode);
-        req.getTransBody().put("bzz269", socialInsurancePsw);
+        req.getTransBody().put("aaz500", requestBean.getSocialInsuranceCode());
+        req.getTransBody().put("bzz269", requestBean.getSocialInsurancePsw());
         Datagram resp = JsonUtil.json2Object(httpConnectionUtil.postWithJson(socialInsuranceUrl, JsonUtil.getJsonString(req)), Datagram.class);
         if (!"00000000".equalsIgnoreCase(resp.getTransReturnCode())) {
             return new ResponseBean<>(ErrorCode.ERROR);

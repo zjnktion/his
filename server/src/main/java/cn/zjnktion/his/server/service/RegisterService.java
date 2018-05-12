@@ -11,10 +11,12 @@ import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
-import javax.validation.constraints.NotNull;
 import java.util.*;
 
 /**
@@ -30,29 +32,13 @@ public class RegisterService {
     @Autowired
     private HttpConnectionUtil httpConnectionUtil;
 
-    @Autowired
-    private BaseService baseService;
-
-    @Autowired
-    private HttpServletRequest request;
-
     @Value("${social.insurance.url}")
     private String socialInsuranceUrl;
 
-    @Value("${social.insurance.hospital.code}")
-    private String socialInsuranceHospitalCode;
-
-    @Value(("${social.insurance.area}"))
-    private String socialInsuranceArea;
-
-    @Value("${social.insurance.channel}")
-    private String socialInsuranceChannel;
-
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.POST)
-    public ResponseBean<?> tryCommit(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, @NotNull String typeCode) {
+    @RequestMapping(value = "/commit/try", method = RequestMethod.POST)
+    public ResponseBean<?> tryCommit(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
         Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
         String dateString = DateFormatUtil.formatDate(now);
         String maxCode = jdbcTemplate.queryForObject("select max(code) from t_register where date_string=?", String.class, dateString);
         String code;
@@ -62,7 +48,8 @@ public class RegisterService {
         else {
             code = String.valueOf(Long.parseLong(maxCode) + 1);
         }
-        Integer patientId = jdbcTemplate.queryForObject("select id from t_patient where social_code=?", Integer.class, socialInsuranceCode);
+        Integer patientId = jdbcTemplate.queryForObject("select id from t_patient where social_code=?", Integer.class, requestBean.getSocialInsuranceCode());
+        String typeCode = requestBean.getParams().get("typeCode");
         RegisterType registerType = jdbcTemplate.queryForObject("select price from t_register_type where code=?", new BeanPropertyRowMapper<>(RegisterType.class), typeCode);
         if (registerType == null) {
             registerType = new RegisterType();
@@ -70,22 +57,14 @@ public class RegisterService {
             registerType.setName("全科");
             registerType.setPrice(0D);
         }
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("MZ001");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
-        String businessCode = socialInsuranceHospitalCode + "R" + code;
+        String businessCode = requestBean.getSocialInsuranceCode() + "R" + code;
         req.getTransBody().put("akc190", businessCode);
-        req.getTransBody().put("aaz500", socialInsuranceCode);
+        req.getTransBody().put("aaz500", requestBean.getSocialInsuranceCode());
         req.getTransBody().put("aka130", "11");
         req.getTransBody().put("akf001", typeCode);
         req.getTransBody().put("bkc368", "1");
@@ -113,31 +92,22 @@ public class RegisterService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.PUT)
-    public ResponseBean<?> commit(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, @NotNull String businessCode) {
-        Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
+    @RequestMapping(value = "/commit/confirm", method = RequestMethod.POST)
+    public ResponseBean<?> confirmCommit(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
+        String businessCode = requestBean.getParams().get("businessCode");
         Register register = jdbcTemplate.queryForObject("select * from t_register where business_code=?", new BeanPropertyRowMapper<>(Register.class), businessCode);
         if (register == null) {
             return new ResponseBean<>(ErrorCode.ERROR);
         }
         RegisterType registerType = jdbcTemplate.queryForObject("select price from t_register_type where code=?", new BeanPropertyRowMapper<>(RegisterType.class), register.getType());
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("MZ002");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
         req.getTransBody().put("akc190", businessCode);
-        req.getTransBody().put("aaz500", socialInsuranceCode);
-        req.getTransBody().put("bzz269", socialInsurancePsw);
+        req.getTransBody().put("aaz500", requestBean.getSocialInsuranceCode());
+        req.getTransBody().put("bzz269", requestBean.getSocialInsurancePsw());
         req.getTransBody().put("aka130", "11");
         req.getTransBody().put("akf001", register.getType());
         req.getTransBody().put("bkc368", "1");
@@ -165,27 +135,18 @@ public class RegisterService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.DELETE)
-    public ResponseBean<?> returnRegister(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, String businessCode) {
-        Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
+    @RequestMapping(value = "/return", method = RequestMethod.POST)
+    public ResponseBean<?> returnRegister(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
+        String businessCode = requestBean.getParams().get("businessCode");
         Register register = jdbcTemplate.queryForObject("select * from t_register where business_code=?", new BeanPropertyRowMapper<>(Register.class), businessCode);
         if (register == null) {
             return new ResponseBean<>(ErrorCode.ERROR);
         }
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("JY002");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
         String returnBusinessCode = businessCode + "X";
         req.getTransBody().put("akc190", returnBusinessCode);
         req.getTransBody().put("ckc618", register.getFinishCode());
@@ -201,8 +162,9 @@ public class RegisterService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/cancle", method = RequestMethod.DELETE)
-    public ResponseBean<?> cancle(@NotNull String businessCode) {
+    @RequestMapping(value = "/cancle", method = RequestMethod.POST)
+    public ResponseBean<?> cancle(@RequestBody RequestBean<String> requestBean) {
+        String businessCode = requestBean.getParams().get("businessCode");
         jdbcTemplate.update("delete from t_register where business_code=?", businessCode);
         return new ResponseBean<>(ErrorCode.SUCCESS);
     }

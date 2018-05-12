@@ -11,7 +11,8 @@ import lombok.NoArgsConstructor;
 public class LoginInfo {
 
     private String account;
-    private String yibaoCode;
-    private String yibaoPsw;
+    private String operatorCode;
+    private String operatorPsw;
+    private String operatorType;
     private Integer type;
 }

@@ -17,10 +17,12 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
-import javax.validation.constraints.NotNull;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.*;
@@ -44,31 +46,19 @@ public class DrugService {
     @Autowired
     private BaseService baseService;
 
-    @Autowired
-    private HttpServletRequest request;
-
     @Value("${social.insurance.url}")
     private String socialInsuranceUrl;
 
-    @Value("${social.insurance.hospital.code}")
-    private String socialInsuranceHospitalCode;
-
-    @Value(("${social.insurance.area}"))
-    private String socialInsuranceArea;
-
-    @Value("${social.insurance.channel}")
-    private String socialInsuranceChannel;
-
-    @RequestMapping(value = "/search", method = RequestMethod.GET)
-    public ResponseBean<?> search(@RequestParam(name = "chufang", defaultValue = "-1") Integer chufang, @RequestParam(name = "name", defaultValue = "") String name) {
+    @RequestMapping(value = "/search", method = RequestMethod.POST)
+    public ResponseBean<?> search(@RequestBody RequestBean<Object> requestBean) {
         StringBuilder sql = new StringBuilder("select * from t_drug where 1=1 and ");
         MapSqlParameterSource params = new MapSqlParameterSource();
-        if (chufang != -1) {
+        if (requestBean.getParams().get("chufang") != null && (Integer) requestBean.getParams().get("chufang") != 1) {
             sql.append("chufang = :chufang");
-            params.addValue("chufang", chufang);
+            params.addValue("chufang", requestBean.getParams().get("chufang"));
         }
         sql.append("name like '%' :name '%'");
-        params.addValue("name", name);
+        params.addValue("name", requestBean.getParams().get("name"));
         List<Drug> drugs = namedParameterJdbcTemplate.query(sql.toString(), params, new BeanPropertyRowMapper<>(Drug.class));
         ResponseBean<List<Drug>> responseBean = new ResponseBean<>(ErrorCode.SUCCESS);
         responseBean.setData(drugs);
@@ -76,12 +66,11 @@ public class DrugService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.POST)
-    public ResponseBean<?> tryCommit(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, @NotNull String drugsString) {
+    @RequestMapping(value = "/commit/try", method = RequestMethod.POST)
+    public ResponseBean<?> tryCommit(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
         Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
         String dateString = DateFormatUtil.formatDate(now);
-        List<Drug> drugs = JsonUtil.json2Object(drugsString, new TypeReference<List<Drug>>() {
+        List<Drug> drugs = JsonUtil.json2Object(requestBean.getParams().get("drugs"), new TypeReference<List<Drug>>() {
         });
         String maxCode = jdbcTemplate.queryForObject("select max(code) from t_sell_drug where date_string=?", String.class, dateString);
         String code;
@@ -91,27 +80,19 @@ public class DrugService {
         else {
             code = String.valueOf(Long.parseLong(maxCode) + 1);
         }
-        Integer patientId = jdbcTemplate.queryForObject("select id from t_patient where social_code=?", Integer.class, socialInsuranceCode);
+        Integer patientId = jdbcTemplate.queryForObject("select id from t_patient where social_code=?", Integer.class, requestBean.getSocialInsuranceCode());
         // todo 获取登录用户id
         Integer doctorId = 1;
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("YD001");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
-        String businessCode = socialInsuranceHospitalCode + "D" + code;
+        String businessCode = requestBean.getHospitalCode() + "D" + code;
         req.getTransBody().put("akc190", businessCode);
         req.getTransBody().put("aka130", "41");
         req.getTransBody().put("cka303", "");
-        req.getTransBody().put("aaz500", socialInsuranceCode);
+        req.getTransBody().put("aaz500", requestBean.getSocialInsuranceCode());
         req.getTransBody().put("alc005", "");
         req.getTransBody().put("listsize", drugs.size());
         List<Map<String, Object>> inputList = new ArrayList<>(drugs.size());
@@ -173,10 +154,9 @@ public class DrugService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.PUT)
-    public ResponseBean<?> commit(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, @NotNull String businessCode) {
-        Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
+    @RequestMapping(value = "/commit/confirm", method = RequestMethod.POST)
+    public ResponseBean<?> confirmCommit(@RequestBody RequestBean<String> requestBean, HttpServletRequest request) {
+        String businessCode = requestBean.getParams().get("businessCode");
         SellDrug sellDrug = jdbcTemplate.queryForObject("select * from t_sell_drug where business_code=?", new BeanPropertyRowMapper<>(SellDrug.class), businessCode);
         if (sellDrug == null) {
             return new ResponseBean<>(ErrorCode.ERROR);
@@ -185,23 +165,15 @@ public class DrugService {
         if (drugs.isEmpty()) {
             return new ResponseBean<>(ErrorCode.ERROR);
         }
-        Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("YD002");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
+        Datagram req = requestBean.con2Basegram(request);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
         req.getTransBody().put("akc190", businessCode);
         req.getTransBody().put("aka130", "41");
         req.getTransBody().put("cka303", "");
-        req.getTransBody().put("aaz500", socialInsuranceCode);
+        req.getTransBody().put("aaz500", requestBean.getSocialInsuranceCode());
         req.getTransBody().put("alc005", "");
         req.getTransBody().put("listsize", drugs.size());
         List<Map<String, Object>> inputList = new ArrayList<>(drugs.size());
@@ -243,27 +215,18 @@ public class DrugService {
     }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
-    @RequestMapping(value = "/{socialInsuranceCode}", method = RequestMethod.DELETE)
-    public ResponseBean<?> returnDrug(@PathVariable String socialInsuranceCode, @RequestParam(name = "socialInsurancePsw", defaultValue = "000000") String socialInsurancePsw, @NotNull String transVersion, @NotNull String verifyCode, String businessCode) {
-        Date now = new Date();
-        String currentDate = DateFormatUtil.format(now);
+    @RequestMapping(value = "/return", method = RequestMethod.POST)
+    public ResponseBean<?> returnDrug(@RequestBody RequestBean<String> requestBean) {
+        String businessCode = requestBean.getParams().get("businessCode");
         SellDrug sellDrug = jdbcTemplate.queryForObject("select * from t_sell_drug where business_code=?", new BeanPropertyRowMapper<>(SellDrug.class), businessCode);
         if (sellDrug == null) {
             return new ResponseBean<>(ErrorCode.ERROR);
         }
         Datagram req = new Datagram();
-        req.setTransTime(currentDate);
-        req.setTransType("JY002");
-        req.setTransVersion(transVersion);
-        req.setSerialNumber(socialInsuranceHospitalCode + currentDate.substring(0, 8) + String.format("%07d", IdGenerater.get()).substring(0, 7));
-        req.setCardArea(socialInsuranceArea);
-        req.setHospitalCode(socialInsuranceHospitalCode);
         // todo 换成登录用户的信息
         req.setOperatorCode("0001");
         req.setOperatorName("张三");
         req.setOperatorPass(StringUtils.EMPTY);
-        req.setTransChannel(socialInsuranceChannel);
-        req.setVerifyCode(verifyCode);
         String returnBusinessCode = businessCode + "X";
         req.getTransBody().put("akc190", returnBusinessCode);
         req.getTransBody().put("ckc618", sellDrug.getFinishCode());
@@ -280,7 +243,8 @@ public class DrugService {
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, rollbackFor = Throwable.class)
     @RequestMapping(value = "/cancle", method = RequestMethod.DELETE)
-    public ResponseBean<?> cancle(@NotNull String businessCode) {
+    public ResponseBean<?> cancle(@RequestBody RequestBean<String> requestBean) {
+        String businessCode = requestBean.getParams().get("businessCode");
         SellDrug sellDrug = jdbcTemplate.queryForObject("select * from t_sell_drug where business_code=?", new BeanPropertyRowMapper<>(SellDrug.class), businessCode);
         if (sellDrug == null) {
             return new ResponseBean<>(ErrorCode.SUCCESS);
